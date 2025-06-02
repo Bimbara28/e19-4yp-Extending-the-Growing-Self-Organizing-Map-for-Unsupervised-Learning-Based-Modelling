@@ -9,7 +9,10 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib import colors
 
-data_filename = "example/data/zoo.txt".replace('\\', '/')
+# Update data filename for Iris dataset
+data_filename = "example/data/iris.csv".replace('\\', '/')
+
+
 
 class GSOM:
     def __init__(self, spred_factor, dimensions, distance='euclidean', initialize='random', learning_rate=0.3,
@@ -271,23 +274,26 @@ class GSOM:
                 collect_paths(child, current_path)
             current_path.pop()
         collect_paths(self.path_tree, [])
-        
         return paths
 
-    
 def plot(output, index_col, gsom_map=None, file_name="gsom", file_type=".pdf", 
          figure_label="GSOM Map with Paths", max_text=3, max_length=30, 
          cmap_colors="Paired", show_index=True, n_nodes=180):
     """
     Plot GSOM nodes with their clustered data points and paths between nodes.
+    Modified to fix legend overlap by moving it outside the plot and simplifying entries.
     """
     max_count = output["hit_count"].max()
     listed_color_map = _get_color_map(max_count, alpha=0.9, cmap_colors=cmap_colors)
     fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Plot all nodes
     if gsom_map:
         ax.plot(gsom_map.node_coordinate[:gsom_map.node_count, 0],
                 gsom_map.node_coordinate[:gsom_map.node_count, 1],
                 'o', color='gray', markersize=2, label='All Nodes')
+
+    # Plot paths between nodes
     if gsom_map:
         paths = gsom_map.get_paths()
         for path in paths:
@@ -296,17 +302,29 @@ def plot(output, index_col, gsom_map=None, file_name="gsom", file_type=".pdf",
                 y_coords = [node.y for node in path]
                 ax.plot(x_coords, y_coords, 'k-', linewidth=0.5, alpha=0.3,
                         label='Node Connections' if path == paths[0] else "")
+
+    # Plot output nodes with hits and collect unique hit counts for the legend
+    hit_count_colors = {}
     for index, i in output.iterrows():
         x = i['x']
         y = i['y']
-        ax.plot(x, y, 'o', color=listed_color_map.colors[i['hit_count']],
-                markersize=6, label=f'Hit Count {i["hit_count"]}' if i['hit_count'] > 0 else "")
-        if show_index and i['hit_count'] > 0:
+        hit_count = i['hit_count']
+        color = listed_color_map.colors[hit_count]
+        ax.plot(x, y, 'o', color=color, markersize=6)
+        if hit_count > 0 and hit_count not in hit_count_colors:
+            hit_count_colors[hit_count] = color
+        if show_index and hit_count > 0:
             label = ", ".join(map(str, i[index_col][0:max_text]))
             txt = ax.text(x, y, label, ha='left', va='center', wrap=True, fontsize=8)
             txt._get_wrap_line_width = lambda: max_length
+
+    # Create legend entries for hit counts
+    for hit_count, color in sorted(hit_count_colors.items()):
+        ax.plot([], [], 'o', color=color, markersize=6, label=f'Hit Count {hit_count}')
+
     ax.set_title(figure_label)
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=6)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=8)
+    plt.tight_layout()
     plt.savefig(file_name + file_type, bbox_inches='tight')
     plt.show()
 
@@ -321,16 +339,20 @@ if __name__ == '__main__':
     try:
         df = pd.read_csv(data_filename)
         print("Dataset shape:", df.shape)
-        data_training = df.iloc[:, 1:17]
-        gsom = GSOM(0.83, 16, max_radius=4, initial_node_size=50000)
+        data_training = df.iloc[:, 1:5]
+        print("Training data shape:", data_training.shape)
+        print("Training data sample:\n", data_training.head())
+
+        gsom = GSOM(0.83, 4, max_radius=4, initial_node_size=50000)
         gsom.fit(data_training.to_numpy(), 100, 50)
         print(gsom.node_count)
-        output = gsom.predict(df, "Name", "label")
+        output = gsom.predict(df, "Id", "Species")
         output.to_csv("output.csv", index=False)
-        plot(output, "Name", gsom_map=gsom, file_name="gsom_with_paths",
+        plot(output, "Id", gsom_map=gsom, file_name="gsom_with_paths_iris",
              file_type=".pdf", figure_label="GSOM Map with Node Paths", n_nodes=gsom.node_count)
         print("Complete")
+
     except FileNotFoundError:
-        print(f"Error: Data file '{data_filename}' not found. Ensure it exists in the correct directory.")
+        print(f"Error: Data file issue. Ensure ucimlrepo is installed and accessible.")
     except Exception as e:
         print(f"Error: {str(e)}")

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib import colors
 import networkx as nx
-import pydot
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 
 class GSOM:
     def __init__(self, spred_factor, dimensions, distance='euclidean', initialize='random', learning_rate=0.3,
@@ -448,19 +448,68 @@ def _get_color_map_pos(max_count, alpha=0.9, cmap_colors="Paired"):
 if __name__ == '__main__':
     np.random.seed(1)
     # Load Zoo dataset
-    data_filename = "example/data/zoo.txt".replace('\\', '/')
+    data_filename = "example/data/ObesityDataSet_raw_and_data_sinthetic.csv".replace('\\', '/')
     df = pd.read_csv(data_filename)
+    df = df.sample(n=200, random_state=42)
+    # Add an Index column using the DataFrame's index
+    df['Index'] = df.index
     
     print("Dataset shape:", df.shape)
-    data_training = df.iloc[:, 1:17]
+    # df = pd.DataFrame(data_filename)
+
+    # Separate features and target
+    features = df.drop(columns=['NObeyesdad', 'Index','MTRANS'])
+    labels = df['NObeyesdad']
+
+    # Define categorical and numerical columns
+    categorical_binary = ['Gender', 'family_history_with_overweight', 'FAVC', 'SMOKE', 'SCC']
+    categorical_ordinal = ['CAEC', 'CALC']
+    # categorical_nominal = ['MTRANS']
+    numerical = ['Age', 'Height', 'Weight', 'FCVC', 'NCP', 'CH2O', 'FAF', 'TUE']
+
+    # 1. Encode binary categorical variables (yes/no, Male/Female)
+    label_encoders = {}
+    for col in categorical_binary:
+        label_encoders[col] = LabelEncoder()
+        features[col] = label_encoders[col].fit_transform(features[col])
+
+    # 2. Encode ordinal categorical variables (CAEC, CALC)
+    # Define the order for ordinal variables
+    caec_order = {'no': 0, 'Sometimes': 1, 'Frequently': 2, 'Always': 3}
+    calc_order = {'no': 0, 'Sometimes': 1, 'Frequently': 2}
+    features['CAEC'] = features['CAEC'].map(caec_order)
+    features['CALC'] = features['CALC'].map(calc_order)
+
+    # 3. One-hot encode nominal categorical variables (MTRANS)
+    # features = pd.get_dummies(features, columns=categorical_nominal, prefix='MTRANS')
+
+    # Convert all columns to float
+    features = features.astype(float)
+
+    # 4. Normalize numerical features to [0, 1]
+    scaler = MinMaxScaler()
+    features[numerical] = scaler.fit_transform(features[numerical])
+
+    df = features.copy()  # Start with preprocessed features
+    df['NObeyesdad'] = labels  # Add back the target column
+    df['Index'] = df.index  # Add the index column
+    print("Preprocessed data shape:", df.shape)
+    print("Preprocessed data columns:", df.columns.tolist())
+    print("Preprocessed data", df.head())
+    # Convert to numpy array for GSOM input
+    data_training = df.iloc[:, 0:15]
+    print(f"Preprocessed data: {data_training.head()}")
+    df.to_csv("Data_obe.csv", index=False)
     print(type(data_training))
-    print("Training data head:", data_training.head())
-    print("Training data shape:", data_training.shape)
+    # print(f"Feature columns: {features.columns}")
     # Train GSOM
-    gsom = GSOM(0.83, 16, max_radius=4, initial_node_size=1000)  # Use 0.25 to match paper
+    gsom = GSOM(0.83, 15, max_radius=4, initial_node_size=30000)  # Use 0.25 to match paper
     gsom.fit(data_training.to_numpy(), 100, 50)
-    output = gsom.predict(df, "Name", "label")
-    output.to_csv("output.csv", index=False)
+    df = df.iloc[:, 0:15]
+    df['Index'] = df.index
+    df['NObeyesdad'] = labels
+    output = gsom.predict(df, "Index", "NObeyesdad")
+    output.to_csv("output_obe.csv", index=False)
     print("GSOM training completed.")
     print("Output shape:", output.shape)
     print("Node Count:", gsom.node_count)
@@ -477,14 +526,14 @@ if __name__ == '__main__':
             "node_coords": ";".join([f"({x},{y})" for x, y in node_coords])
         })
     paths_df = pd.DataFrame(paths_data)
-    paths_df.to_csv("paths_of_spread.csv", index=False)
+    paths_df.to_csv("paths_of_spread_obe.csv", index=False)
     
     # Build skeleton and separate clusters
-    clusters, segments, skeleton_connections, pos_edges = gsom.separate_clusters(data_training.to_numpy(), max_clusters=7)
+    clusters, segments, skeleton_connections, pos_edges = gsom.separate_clusters(data_training.to_numpy(), max_clusters=17)
     
     # Plot GSOM map
-    plot(output, "Name", gsom_map=gsom, file_name="gsom_map", file_type=".pdf", figure_label="GSOM Map")
-    plot_pos(output, "Name", gsom_map=gsom, file_name="gsom_with_paths_sk",
+    plot(output, "Index", gsom_map=gsom, file_name="gsom_map", file_type=".pdf", figure_label="GSOM Map")
+    plot_pos(output, "Index", gsom_map=gsom, file_name="gsom_with_paths_sk_obe",
              file_type=".pdf", figure_label="GSOM Map with Node Paths", n_nodes=gsom.node_count)
     # Plot skeleton with clusters
     fig, ax = plt.subplots(figsize=(10, 10))
@@ -547,10 +596,10 @@ if __name__ == '__main__':
         ax.plot([x1, x2], [y1, y2], color=color, linestyle=line_style, alpha=alpha)
     
     colors = ['green', 'red', 'black', 'cyan']
-    print("Clusters found:", len(clusters[-1]))
+    # print(clusters)
+    # Plot clusters
     # Save clusters to a CSV file
     clusters_data = []
-    # Plot clusters
     for idx, cluster in enumerate(clusters[-1]):
         print(f"Cluster {idx + 1}: {len(cluster)} nodes : Color {colors[idx % len(colors)]}")
 
@@ -560,18 +609,18 @@ if __name__ == '__main__':
         "color": colors[idx % len(colors)],
         "size": len(cluster)
         })
-        
+
         for node_idx in cluster:
             x, y = gsom.node_coordinate[node_idx]
-            ax.scatter(x, y, c=colors[idx % len(colors)], s=20, marker='o', alpha=0.5)
-    
+            ax.scatter(x, y, c=colors[idx % len(colors)], s=10, marker='o', alpha=0.7)
+
     # Convert clusters data to DataFrame and save to CSV
     clusters_df = pd.DataFrame(clusters_data)
-    clusters_df.to_csv("clusters_zoo.csv", index=False)
+    clusters_df.to_csv("clusters_obe.csv", index=False)
 
     ax.set_title("GSOM Skeleton with Clusters")
     # ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=5)
-    plt.savefig("gsom_skeleton.pdf")
+    plt.savefig("gsom_skeleton_obe.pdf")
     plt.show()
     
     # Print segment distances
@@ -580,10 +629,10 @@ if __name__ == '__main__':
     #     print(f"Segment {i+1}: {node1}-{node2}, Distance: {dist}")
     #     # Save segment distances to CSV
     segment_df = pd.DataFrame(segments, columns=["node1", "node2", "distance"])
-    segment_df.to_csv("segment_distances.csv", index=False)
+    segment_df.to_csv("segment_distances_obe.csv", index=False)
     
     # Export path tree to DOT file
     graph = tree_to_dot(gsom.path_tree)
-    graph.write_png("path_tree.png")
+    graph.write_png("path_tree_obe.png")
 
     print("Complete")
